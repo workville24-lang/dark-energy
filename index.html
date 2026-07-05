@@ -2,50 +2,68 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <!-- Запуск как полноэкранное веб-приложение с домашнего экрана (без адресной строки на iPhone) -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Dark Energy">
+    <meta name="theme-color" content="#000000">
     <title>Dark Energy</title>
     <style>
         * { box-sizing: border-box; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
         html, body {
-            margin: 0; padding: 0; height: 100%;
+            margin: 0; padding: 0;
+            width: 100%;
+            height: 100vh; height: 100dvh;   /* dvh = учитывает свернувшуюся панель Safari */
             background-color: #000;
             font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        #wrap {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
             display: flex; justify-content: center; align-items: center;
             overflow: hidden;
         }
-        #wrap { position: relative; max-width: 100%; max-height: 100vh; }
+        /* Если телефон держат вертикально — разворачиваем игру в ландшафт на весь экран */
+        @media (orientation: portrait) {
+            #wrap {
+                top: 50%; left: 50%;
+                width: 100vh;  height: 100vw;
+                width: 100dvh; height: 100dvw;
+                transform: translate(-50%, -50%) rotate(90deg);
+                transform-origin: center center;
+            }
+        }
         #gameCanvas {
             display: block;
+            width: auto; height: auto;
+            max-width: 100%; max-height: 100%;   /* заполняет доступное место, сохраняя 16:9 */
             background-color: #87CEEB;
-            border: 4px solid #333;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.5);
-            max-width: 100%; max-height: 100vh;
+            touch-action: none;
         }
         /* Кнопки управления поверх холста */
         #controls {
-            position: absolute; left: 0; right: 0; bottom: 12px;
+            position: absolute; left: 0; right: 0; bottom: 0;
             display: flex; justify-content: space-between;
-            padding: 0 18px; pointer-events: none;
+            padding: 10px max(16px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+            pointer-events: none;
         }
-        #left-cluster, #right-cluster { display: flex; gap: 14px; pointer-events: none; }
+        #left-cluster, #right-cluster { display: flex; gap: 12px; pointer-events: none; }
         .btn {
-            width: 64px; height: 64px;
+            width: 58px; height: 58px;
             background-color: rgba(255,255,255,0.72);
             border: 3px solid #333; border-radius: 50%;
             display: flex; justify-content: center; align-items: center;
-            font-size: 28px; cursor: pointer; pointer-events: auto;
+            font-size: 26px; cursor: pointer; pointer-events: auto;
             box-shadow: 0 4px 0 #333; touch-action: none;
         }
         .btn:active { transform: translateY(4px); box-shadow: none; }
         #btn-kick { background-color: rgba(255,87,34,0.85); }
         #btn-shoot { background-color: rgba(0,200,255,0.85); display: none; }
         #btn-eat  { background-color: rgba(120,220,120,0.9); }
-        /* оверлей стартового экрана / кнопки рестарта живут прямо на canvas-кликах */
-        #tapHint {
-            position: absolute; left: 0; right: 0; top: 50%;
-            text-align: center; color: #fff; font-size: 18px;
-            pointer-events: none; text-shadow: 0 2px 4px #000; display: none;
-        }
+        #tapHint { display: none; }
     </style>
 </head>
 <body>
