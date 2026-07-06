@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <!-- Запуск как полноэкранное веб-приложение с домашнего экрана (без адресной строки на iPhone) -->
+    <!-- Launch as a fullscreen web-app from the Home Screen (no address bar on iPhone) -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -15,9 +15,9 @@
         html, body {
             margin: 0; padding: 0;
             width: 100%;
-            height: 100vh; height: 100dvh;   /* dvh = учитывает свернувшуюся панель Safari */
-            background-color: #000;
-            font-family: Arial, sans-serif;
+            height: 100vh; height: 100dvh;
+            background: #000;
+            font-family: 'Courier New', monospace;
             overflow: hidden;
         }
         #wrap {
@@ -26,7 +26,7 @@
             display: flex; justify-content: center; align-items: center;
             overflow: hidden;
         }
-        /* Если телефон держат вертикально — разворачиваем игру в ландшафт на весь экран */
+        /* Held in portrait? Rotate the game into landscape to fill the whole screen */
         @media (orientation: portrait) {
             #wrap {
                 top: 50%; left: 50%;
@@ -39,31 +39,38 @@
         #gameCanvas {
             display: block;
             width: auto; height: auto;
-            max-width: 100%; max-height: 100%;   /* заполняет доступное место, сохраняя 16:9 */
-            background-color: #87CEEB;
+            max-width: 100%; max-height: 100%;
+            background: #000;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
             touch-action: none;
         }
-        /* Кнопки управления поверх холста */
+        /* CRT scanline overlay for the 80s arcade look */
+        #crt {
+            position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+            background: repeating-linear-gradient(0deg, rgba(0,0,0,0.18) 0px, rgba(0,0,0,0.18) 1px, transparent 1px, transparent 3px);
+            mix-blend-mode: multiply;
+        }
         #controls {
             position: absolute; left: 0; right: 0; bottom: 0;
             display: flex; justify-content: space-between;
-            padding: 10px max(16px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+            padding: 8px max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
             pointer-events: none;
         }
-        #left-cluster, #right-cluster { display: flex; gap: 12px; pointer-events: none; }
+        #left-cluster, #right-cluster { display: flex; gap: 9px; pointer-events: none; }
         .btn {
-            width: 58px; height: 58px;
-            background-color: rgba(255,255,255,0.72);
-            border: 3px solid #333; border-radius: 50%;
+            width: 46px; height: 46px;
+            background: rgba(20,20,30,0.6);
+            border: 2px solid #39ff14; border-radius: 50%;
             display: flex; justify-content: center; align-items: center;
-            font-size: 26px; cursor: pointer; pointer-events: auto;
-            box-shadow: 0 4px 0 #333; touch-action: none;
+            font-size: 21px; cursor: pointer; pointer-events: auto;
+            box-shadow: 0 0 6px #39ff14; touch-action: none;
+            color: #fff;
         }
-        .btn:active { transform: translateY(4px); box-shadow: none; }
-        #btn-kick { background-color: rgba(255,87,34,0.85); }
-        #btn-shoot { background-color: rgba(0,200,255,0.85); display: none; }
-        #btn-eat  { background-color: rgba(120,220,120,0.9); }
-        #tapHint { display: none; }
+        .btn:active { transform: translateY(3px); box-shadow: none; }
+        #btn-kick  { border-color: #ff5722; box-shadow: 0 0 6px #ff5722; }
+        #btn-shoot { border-color: #00e5ff; box-shadow: 0 0 6px #00e5ff; display: none; }
+        #btn-eat   { border-color: #ffd700; box-shadow: 0 0 6px #ffd700; }
     </style>
 </head>
 <body>
@@ -76,12 +83,12 @@
         </div>
         <div id="right-cluster">
             <div class="btn" id="btn-eat">🍔</div>
-            <div class="btn" id="btn-shoot">⚡</div>
+            <div class="btn" id="btn-shoot">🦴</div>
             <div class="btn" id="btn-kick">🦵</div>
         </div>
     </div>
-    <div id="tapHint"></div>
 </div>
+<div id="crt"></div>
 
 <script>
 "use strict";
@@ -89,93 +96,120 @@ const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 const W = canvas.width, H = canvas.height;
 
-// ================= МИР =================
-const GROUND_Y = 380;                 // верх асфальта / уровень земли
-const WORLD_END = 7200;               // длина всей игры по оси X
-const BOSS_GATE_X = 6500;             // отсюда камера стопорится, начинается арена босса
+// ================= WORLD =================
+const GROUND_Y = 380;
+const WORLD_END = 7200;
+const BOSS_GATE_X = 6500;
 
-// Границы локаций (для смены фона и атмосферы)
 const ZONES = [
-    { name: "city",  end: 1700 },
-    { name: "forest",end: 3300 },
-    { name: "lab",   end: 4900 },
-    { name: "cave",  end: WORLD_END }
+    { name: "city",   end: 1700 },
+    { name: "forest", end: 3300 },
+    { name: "lab",    end: 4900 },
+    { name: "cave",   end: WORLD_END }
 ];
 function zoneAt(x){ for (const z of ZONES) if (x < z.end) return z.name; return "cave"; }
 
-// ================= СОСТОЯНИЕ =================
+// 80s neon palette
+const NEON = { green:"#39ff14", magenta:"#ff00ff", cyan:"#00e5ff", yellow:"#ffe600", pink:"#ff2f6e", purple:"#b060ff" };
+const FONT = "'Courier New', monospace";
+
+// ================= SOUND (retro 8-bit via WebAudio) =================
+let actx = null;
+function audioInit(){
+    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+    if (actx && actx.state === "suspended") actx.resume();
+}
+function beep(freq, dur, type, vol, slideTo){
+    if (!actx) return;
+    const t = actx.currentTime;
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type || "square";
+    o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+    g.gain.setValueAtTime(vol || 0.15, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t); o.stop(t + dur);
+}
+const SFX = {
+    start(){ beep(330,0.08,"square",0.2); setTimeout(()=>beep(660,0.15,"square",0.2),90); },
+    step(){ beep(110,0.04,"square",0.05); },
+    kick(){ beep(220,0.12,"square",0.2,70); },
+    bone(){ beep(500,0.1,"square",0.15,950); },
+    potion(){ beep(700,0.12,"triangle",0.15,1300); },
+    pickup(){ beep(600,0.06,"square",0.18); setTimeout(()=>beep(900,0.08,"square",0.18),60); },
+    ammo(){ beep(400,0.06,"square",0.18); setTimeout(()=>beep(520,0.09,"square",0.18),55); },
+    heal(){ beep(500,0.1,"triangle",0.18,820); },
+    hurt(){ beep(170,0.18,"sawtooth",0.2,60); },
+    down(){ beep(420,0.12,"square",0.18,120); },
+    wee(){ beep(300,0.35,"sine",0.22,1600); },
+    bossHit(){ beep(150,0.1,"square",0.18,90); },
+    bossAppear(){ beep(80,0.5,"sawtooth",0.22,180); },
+    win(){ [523,659,784,1047].forEach((f,i)=>setTimeout(()=>beep(f,0.18,"square",0.2),i*140)); },
+    lose(){ [400,300,200,120].forEach((f,i)=>setTimeout(()=>beep(f,0.25,"sawtooth",0.2),i*160)); }
+};
+["pointerdown","keydown","touchstart"].forEach(ev => window.addEventListener(ev, audioInit));
+
+// ================= STATE =================
 let gameState = "start"; // start | play | dead | win
 let cameraX = 0;
 let tick = 0;
 
 const player = {
-    x: 100, y: GROUND_Y - 80, w: 46, h: 80,
-    color: "#1E90FF", facing: 1,
+    x: 100, y: GROUND_Y - 80, w: 40, h: 80,
+    facing: 1,
     hp: 100, maxHp: 100,
     isKicking: false, kickTimer: 0,
     shootCd: 0, hurtCd: 0,
-    hasLaser: false,
-    inv: { burger: 0, apple: 0, tube: 0 } // еда по локациям
+    inv: { burger: 0, apple: 0 },   // healing food
+    ammo: { bone: 0, potion: 0 }    // thrown weapons
 };
 
-let cans = [];       // мусорные баки (город)
-let apples = [];     // яблоки (лес)
-let chests = [];     // сундуки (пещера)
-let enemies = [];    // еноты, белки, зомби, щупальца, скелеты
-let items = [];      // выпавшая еда/оружие на земле
-let shots = [];      // выстрелы игрока
-let bossShots = [];  // снаряды босса
-let popups = [];     // всплывающий текст ("Уи-и-и!" и т.п.)
+let cans = [], apples = [], chests = [], enemies = [], items = [];
+let shots = [], bossShots = [], popups = [];
 let boss = null;
 
-// ================= ПОСТРОЙКА УРОВНЯ =================
+// ================= LEVEL BUILD =================
 function buildWorld() {
     cans = []; apples = []; chests = []; enemies = []; items = [];
     shots = []; bossShots = []; popups = []; boss = null;
 
-    // --- Город: баки с енотами и бургерами ---
-    const cityCans = [500, 800, 1150, 1450];
-    cityCans.forEach((x, i) => {
+    // City: trash cans with raccoons and burgers
+    [500, 800, 1150, 1450].forEach((x, i) => {
         cans.push({ x, y: GROUND_Y - 60, w: 50, h: 60,
-            kicked: false, shake: 0,
-            hasRaccoon: i % 2 === 0,   // в каждом втором сидит енот
-            hasBurger: true });
+            kicked: false, shake: 0, hasRaccoon: i % 2 === 0, hasBurger: true });
     });
 
-    // --- Лес: яблоки под охраной белок ---
-    const forestApples = [2000, 2350, 2700, 3050];
-    forestApples.forEach(x => {
+    // Forest: apples guarded by squirrels
+    [2000, 2350, 2700, 3050].forEach(x => {
         apples.push({ x, y: GROUND_Y - 18, w: 26, h: 18, taken: false, gone: false });
         enemies.push(makeEnemy("squirrel", x + 40, GROUND_Y - 34));
     });
 
-    // --- Лаборатория: гаджет-лазер + зомби + тюбики ---
-    items.push({ type: "laser", x: 3450, y: GROUND_Y - 30, w: 30, h: 30, vy: 0 });
+    // Lab: zombies (drop potions when killed)
     [3700, 3950, 4200, 4500, 4750].forEach(x => enemies.push(makeEnemy("zombie", x, GROUND_Y - 78)));
 
-    // --- Пещера/Замок: щупальца + сундуки со скелетами ---
+    // Cave/Castle: tentacles + chests (give bones + skeletons)
     [5100, 5350, 5600, 5900, 6150, 6350].forEach(x => enemies.push(makeEnemy("tentacle", x, GROUND_Y)));
     [5250, 5800, 6250].forEach(x => chests.push({ x, y: GROUND_Y - 40, w: 46, h: 40, opened: false }));
 }
 
 function makeEnemy(type, x, y) {
-    const base = { type, x, y, vx: 0, vy: 0, alive: true, state: "idle",
-        biteCd: 0, hitFlash: 0, carrying: false };
-    if (type === "raccoon") return Object.assign(base, { w: 40, h: 34, hp: 1 });
-    if (type === "squirrel")return Object.assign(base, { w: 30, h: 30, hp: 1, state: "guard" });
-    if (type === "zombie")  return Object.assign(base, { w: 46, h: 78, hp: 2, state: "walk" });
-    if (type === "tentacle")return Object.assign(base, { w: 40, h: 90, hp: 2, state: "hidden", h0: 0 });
-    if (type === "skeleton")return Object.assign(base, { w: 36, h: 60, hp: 1, state: "chase" });
+    const base = { type, x, y, vx: 0, vy: 0, alive: true, state: "idle", biteCd: 0, hitFlash: 0 };
+    if (type === "raccoon")  return Object.assign(base, { w: 40, h: 34, hp: 1 });
+    if (type === "squirrel") return Object.assign(base, { w: 30, h: 30, hp: 1, state: "guard" });
+    if (type === "zombie")   return Object.assign(base, { w: 46, h: 78, hp: 2, state: "walk" });
+    if (type === "tentacle") return Object.assign(base, { w: 40, h: 90, hp: 2, state: "hidden", h0: 0 });
+    if (type === "skeleton") return Object.assign(base, { w: 36, h: 60, hp: 1, state: "chase" });
     return base;
 }
 
-// ================= УПРАВЛЕНИЕ =================
+// ================= INPUT =================
 let moveRight = false, moveLeft = false;
 const $ = id => document.getElementById(id);
 const btnMove = $("btn-move"), btnBack = $("btn-back"),
       btnKick = $("btn-kick"), btnShoot = $("btn-shoot"), btnEat = $("btn-eat");
 
-// helper: удержание кнопки (мышь + тач + уход пальца = отпускание)
 function holdButton(el, onDown, onUp) {
     el.addEventListener("mousedown", e => { e.preventDefault(); onDown(); });
     el.addEventListener("mouseup", onUp);
@@ -195,12 +229,10 @@ tapButton(btnKick, doKick);
 tapButton(btnShoot, doShoot);
 tapButton(btnEat, doEat);
 
-// стартовый экран / рестарт по тапу или клику на холст
 canvas.addEventListener("mousedown", handleTap);
 canvas.addEventListener("touchstart", e => { e.preventDefault(); handleTap(); }, { passive: false });
 function handleTap() {
-    if (gameState === "start") { startGame(); }
-    else if (gameState === "dead" || gameState === "win") { startGame(); }
+    if (gameState === "start" || gameState === "dead" || gameState === "win") startGame();
 }
 
 window.addEventListener("keydown", e => {
@@ -215,43 +247,38 @@ window.addEventListener("keyup", e => {
     if (e.code === "ArrowLeft"  || e.code === "KeyA") moveLeft = false;
 });
 
-// ================= ДЕЙСТВИЯ =================
+// ================= ACTIONS =================
 function startGame() {
+    audioInit();
     Object.assign(player, {
         x: 100, y: GROUND_Y - 80, facing: 1, hp: 100,
-        isKicking: false, kickTimer: 0, shootCd: 0, hurtCd: 0, hasLaser: false,
-        inv: { burger: 0, apple: 0, tube: 0 }
+        isKicking: false, kickTimer: 0, shootCd: 0, hurtCd: 0,
+        inv: { burger: 0, apple: 0 }, ammo: { bone: 0, potion: 0 }
     });
     moveRight = moveLeft = false;
     cameraX = 0; tick = 0;
-    btnShoot.style.display = "none";
+    updateShootBtn();
     buildWorld();
     gameState = "play";
+    SFX.start();
+}
+
+function updateShootBtn() {
+    btnShoot.style.display = (player.ammo.bone + player.ammo.potion > 0) ? "flex" : "none";
 }
 
 function doKick() {
-    if (gameState !== "play") return;
-    if (player.isKicking) return;
-    player.isKicking = true;
-    player.kickTimer = 14;
+    if (gameState !== "play" || player.isKicking) return;
+    player.isKicking = true; player.kickTimer = 14;
+    SFX.kick();
 
     const range = 34;
     const kx = player.facing === 1 ? player.x + player.w : player.x - range;
     const hb = { x: kx, y: player.y + 20, w: range, h: player.h - 20 };
 
-    // Пинаем баки
-    for (const c of cans) {
-        if (aabb(hb, c)) kickCan(c);
-    }
-    // Пинаем сундуки
-    for (const ch of chests) {
-        if (!ch.opened && aabb(hb, ch)) openChest(ch);
-    }
-    // Пинаем врагов
-    for (const e of enemies) {
-        if (!e.alive) continue;
-        if (aabb(hb, e)) kickEnemy(e);
-    }
+    for (const c of cans) if (aabb(hb, c)) kickCan(c);
+    for (const ch of chests) if (!ch.opened && aabb(hb, ch)) openChest(ch);
+    for (const e of enemies) if (e.alive && aabb(hb, e)) kickEnemy(e);
 }
 
 function kickCan(c) {
@@ -259,133 +286,122 @@ function kickCan(c) {
     if (c.kicked) return;
     c.kicked = true;
     if (c.hasRaccoon) {
-        // выскакивает енот
         const r = makeEnemy("raccoon", c.x + 4, c.y - 8);
         r.state = "chase"; r.vy = -6;
         enemies.push(r);
         popup(c.x, c.y - 30, "!", "#fff");
     } else if (c.hasBurger) {
-        dropFood("burger", c.x + 10, c.y - 10);
+        dropItem("burger", c.x - 30, c.y - 10);
         c.hasBurger = false;
     }
 }
 
 function openChest(ch) {
     ch.opened = true;
-    // вылетает скелет
+    player.ammo.bone += 5;
+    updateShootBtn();
+    popup(ch.x, ch.y - 20, "+5 BONES", NEON.cyan);
+    SFX.ammo();
     const s = makeEnemy("skeleton", ch.x, GROUND_Y - 60);
     s.vy = -7; s.vx = (Math.random() < 0.5 ? -1 : 1) * 2;
     enemies.push(s);
-    popup(ch.x, ch.y - 20, "☠", "#fff");
 }
 
 function kickEnemy(e) {
     e.hitFlash = 8;
     if (e.type === "raccoon") {
-        e.alive = false;
-        popup(e.x, e.y - 20, "★", "#ffd700");
-        // после енота из его бака вылетает бургер (или просто дропаем)
-        dropFood("burger", e.x, e.y - 10);
+        e.alive = false; SFX.down();
+        popup(e.x, e.y - 20, "★", NEON.yellow);
+        dropItem("burger", e.x, e.y - 10);
     } else if (e.type === "squirrel") {
-        // улетает с воплем
-        e.alive = false;
-        popup(e.x, e.y - 30, "Уи-и-и!", "#ff66cc");
-        // яблоко, которое она стерегла, становится доступным
-        const a = nearestApple(e.x);
-        if (a && !a.gone) a.guarded = false;
+        e.alive = false; SFX.wee();
+        popup(e.x, e.y - 30, "WHEEE!", NEON.pink);
     } else if (e.type === "skeleton") {
-        e.alive = false;
+        e.alive = false; SFX.down();
         popup(e.x, e.y - 20, "★", "#ddd");
     } else if (e.type === "zombie" || e.type === "tentacle") {
-        // пинок слабый против них — лишь чуть отталкивает
-        e.hp -= 0.34;
-        e.vx = player.facing * 3;
-        if (e.hp <= 0) { e.alive = false; if (e.type === "zombie") dropFood("tube", e.x, e.y); }
+        e.hp -= 1; e.vx = player.facing * 3;
+        if (e.hp <= 0) {
+            e.alive = false; SFX.down();
+            if (e.type === "zombie") dropItem("potion", e.x, e.y);
+        }
     }
 }
 
 function doShoot() {
-    if (gameState !== "play" || !player.hasLaser) return;
-    if (player.shootCd > 0) return;
+    if (gameState !== "play") return;
+    let kind = null;
+    if (player.ammo.bone > 0) kind = "bone";
+    else if (player.ammo.potion > 0) kind = "potion";   // potions thrown after bones run out
+    if (!kind || player.shootCd > 0) return;
     player.shootCd = 16;
-    shots.push({ x: player.x + player.w/2, y: player.y + 30,
-                 w: 16, h: 6, vx: player.facing * 11 });
+    player.ammo[kind]--;
+    shots.push({ x: player.x + player.w/2, y: player.y + 28, w: 18, h: 12,
+                 vx: player.facing * 10, kind, spin: 0 });
+    (kind === "bone") ? SFX.bone() : SFX.potion();
+    updateShootBtn();
 }
 
 function doEat() {
-    if (gameState !== "play") return;
-    if (player.hp >= player.maxHp) return;
+    if (gameState !== "play" || player.hp >= player.maxHp) return;
     let food = null;
     if (player.inv.burger > 0) food = "burger";
     else if (player.inv.apple > 0) food = "apple";
-    else if (player.inv.tube > 0) food = "tube";
     if (!food) return;
     player.inv[food]--;
-    const heal = food === "tube" ? 45 : 30;
-    player.hp = Math.min(player.maxHp, player.hp + heal);
-    popup(player.x + 10, player.y - 10, "+" + heal, "#7CFC00");
+    player.hp = Math.min(player.maxHp, player.hp + 30);
+    popup(player.x + 10, player.y - 10, "+30", NEON.green);
+    SFX.heal();
 }
 
-// ================= УТИЛИТЫ =================
+// ================= HELPERS =================
 function aabb(a, b){ return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
-function dropFood(type, x, y){ items.push({ type, x, y, w: type==="tube"?18:30, h: type==="tube"?28:20, vy: -3 }); }
+function dropItem(type, x, y){
+    const w = (type === "potion") ? 18 : (type === "burger" ? 30 : 26);
+    const h = (type === "potion") ? 24 : 20;
+    items.push({ type, x, y, w, h, vy: -3 });
+}
 function popup(x, y, text, color){ popups.push({ x, y, text, color, life: 50 }); }
-function nearestApple(x){ let best=null,d=1e9; for(const a of apples){ if(a.gone)continue; const dd=Math.abs(a.x-x); if(dd<d){d=dd;best=a;} } return best; }
-function hurt(dmg){ if(player.hurtCd>0)return; player.hp-=dmg; player.hurtCd=40; popup(player.x+10,player.y-10,"-"+dmg,"#ff3030"); if(player.hp<=0){player.hp=0;gameState="dead";} }
+function hurt(dmg){
+    if (player.hurtCd > 0) return;
+    player.hp -= dmg; player.hurtCd = 40;
+    popup(player.x + 10, player.y - 10, "-" + dmg, NEON.pink);
+    SFX.hurt();
+    if (player.hp <= 0) { player.hp = 0; gameState = "dead"; SFX.lose(); }
+}
 
-// ================= ОБНОВЛЕНИЕ =================
+// ================= UPDATE =================
 function update() {
     if (gameState !== "play") return;
     tick++;
 
-    // Движение игрока
-    let speed = 4;
     let dx = 0;
-    if (moveRight) dx += speed;
-    if (moveLeft)  dx -= speed;
-    // Баки НЕ блокируют проход — иначе игрок упрётся в первый бак и не пройдёт уровень.
-    // Их можно только пинать (дистанция проверяется в doKick).
+    if (moveRight) dx += 4;
+    if (moveLeft)  dx -= 4;
     player.x = Math.max(0, Math.min(player.x + dx, WORLD_END - player.w));
+    if (dx !== 0 && tick % 16 === 0) SFX.step();
 
-    // Таймеры игрока
     if (player.isKicking && --player.kickTimer <= 0) player.isKicking = false;
     if (player.shootCd > 0) player.shootCd--;
     if (player.hurtCd > 0) player.hurtCd--;
 
-    // Камера (стопорится на арене босса)
     cameraX = Math.max(0, Math.min(player.x - W/2 + player.w/2, WORLD_END - W));
     if (player.x >= BOSS_GATE_X) cameraX = Math.min(cameraX, BOSS_GATE_X - W/2 + 200);
 
-    // Спавн босса
     if (player.x >= BOSS_GATE_X - 100 && !boss) spawnBoss();
 
-    updateCans();
-    updateItems();
-    updateApples();
-    updateEnemies();
-    updateShots();
-    updateBoss();
-    updatePopups();
+    for (const c of cans) if (c.shake > 0) c.shake--;
+    updateItems(); updateApples(); updateEnemies(); updateShots(); updateBoss(); updatePopups();
 }
-
-function updateCans(){ for (const c of cans) if (c.shake > 0) c.shake--; }
 
 function updateItems() {
     for (const it of items) {
-        it.vy += 0.5;
-        it.y += it.vy;
+        it.vy += 0.5; it.y += it.vy;
         const rest = GROUND_Y - it.h;
         if (it.y > rest) { it.y = rest; it.vy = 0; }
-        // подбор
         if (aabb(player, it)) {
-            if (it.type === "laser") {
-                player.hasLaser = true;
-                btnShoot.style.display = "flex";
-                popup(player.x, player.y - 20, "⚡ ЛАЗЕР!", "#00e5ff");
-            } else {
-                player.inv[it.type]++;
-                popup(player.x, player.y - 20, "+1", "#fff");
-            }
+            if (it.type === "potion") { player.ammo.potion += 3; updateShootBtn(); popup(player.x, player.y-20, "+POTION", NEON.magenta); SFX.ammo(); }
+            else { player.inv[it.type]++; popup(player.x, player.y-20, "+1", "#fff"); SFX.pickup(); }
             it.dead = true;
         }
     }
@@ -395,16 +411,13 @@ function updateItems() {
 function updateApples() {
     for (const a of apples) {
         if (a.taken || a.gone) continue;
-        // если охраняющая белка ещё жива и игрок близко — белка утащит яблоко
         const guard = enemies.find(e => e.type === "squirrel" && e.alive && Math.abs(e.x - a.x) < 60);
-        if (guard && Math.abs(player.x - a.x) < 70) {
-            // остаётся под охраной; яблоко нельзя взять пока белка рядом
-            continue;
-        }
+        if (guard && Math.abs(player.x - a.x) < 70) continue; // squirrel still guarding
         if (aabb(player, a)) {
             a.taken = true; a.gone = true;
             player.inv.apple++;
-            popup(a.x, a.y - 20, "+🍎", "#ff5555");
+            popup(a.x, a.y - 20, "+APPLE", "#ff5555");
+            SFX.pickup();
         }
     }
 }
@@ -415,36 +428,26 @@ function updateEnemies() {
         if (e.hitFlash > 0) e.hitFlash--;
         if (e.biteCd > 0) e.biteCd--;
 
-        // гравитация для прыгучих
         if (e.type === "raccoon" || e.type === "skeleton") {
             e.vy += 0.5; e.y += e.vy; e.x += e.vx;
             const floor = GROUND_Y - e.h;
             if (e.y > floor) { e.y = floor; e.vy = 0; e.vx *= 0.8; }
         }
-
         const dist = player.x - e.x;
 
         if (e.type === "raccoon" || e.type === "skeleton") {
-            // преследуют игрока
             if (Math.abs(dist) > 4) e.x += Math.sign(dist) * 1.6;
             if (aabb(player, e) && e.biteCd <= 0) { hurt(8); e.biteCd = 45; }
-        }
-        else if (e.type === "squirrel") {
-            // сидит и стережёт; лёгкое подрагивание
+        } else if (e.type === "squirrel") {
             e.y = GROUND_Y - 30 + Math.sin(tick*0.2 + e.x)*2;
-        }
-        else if (e.type === "zombie") {
-            // медленно бредёт к игроку, если тот в зоне видимости
+        } else if (e.type === "zombie") {
             if (Math.abs(dist) < 360 && Math.abs(dist) > 4) e.x += Math.sign(dist) * 0.8;
             e.vx *= 0.8; e.x += e.vx;
             if (aabb(player, e) && e.biteCd <= 0) { hurt(12); e.biteCd = 50; }
-        }
-        else if (e.type === "tentacle") {
-            // выныривает из земли когда игрок близко
+        } else if (e.type === "tentacle") {
             const near = Math.abs(dist) < 90;
             e.h0 = e.h0 || 0;
-            const target = near ? e.h : 0;
-            e.h0 += (target - e.h0) * 0.15;
+            e.h0 += ((near ? e.h : 0) - e.h0) * 0.15;
             e.vx *= 0.8; e.x += e.vx;
             const hitbox = { x: e.x, y: GROUND_Y - e.h0, w: e.w, h: e.h0 };
             if (e.h0 > 30 && aabb(player, hitbox) && e.biteCd <= 0) { hurt(14); e.biteCd = 55; }
@@ -455,8 +458,8 @@ function updateEnemies() {
 
 function updateShots() {
     for (const s of shots) {
-        s.x += s.vx;
-        if (s.x < cameraX - 50 || s.x > cameraX + W + 50) s.dead = true;
+        s.x += s.vx; s.spin += 0.4;
+        if (s.x < cameraX - 60 || s.x > cameraX + W + 60) s.dead = true;
         for (const e of enemies) {
             if (!e.alive) continue;
             let box = e;
@@ -464,68 +467,56 @@ function updateShots() {
             if (aabb(s, box)) {
                 e.hp -= 1; e.hitFlash = 8; s.dead = true;
                 if (e.hp <= 0) {
-                    e.alive = false;
-                    if (e.type === "zombie") dropFood("tube", e.x, e.y);
+                    e.alive = false; SFX.down();
+                    if (e.type === "zombie") dropItem("potion", e.x, e.y);
                 }
             }
         }
-        // попадание по боссу
         if (boss && boss.alive && aabb(s, boss)) {
-            boss.hp -= 1; boss.hitFlash = 8; s.dead = true;
+            boss.hp -= 1; boss.hitFlash = 8; s.dead = true; SFX.bossHit();
             if (boss.hp <= 0) bossPhaseEnd();
         }
     }
     shots = shots.filter(s => !s.dead);
 }
 
-// ================= БОСС =================
+// ================= BOSS =================
 function spawnBoss() {
     boss = { x: BOSS_GATE_X + 340, y: GROUND_Y - 150, w: 120, h: 130,
-             hp: 12, maxHp: 12, stage: 1, alive: true, hitFlash: 0,
-             t: 0, atkCd: 90 };
-    popup(BOSS_GATE_X + 200, 120, "ТЁМНАЯ МАТЕРИЯ", "#b060ff");
+             hp: 12, maxHp: 12, stage: 1, alive: true, hitFlash: 0, t: 0, atkCd: 90 };
+    popup(BOSS_GATE_X + 200, 120, "MISHA", NEON.purple);
+    SFX.bossAppear();
 }
-
 function bossPhaseEnd() {
     if (boss.stage === 1) {
-        // Сюрприз: воскресает вдвое больше и злее
         boss.stage = 2;
-        boss.w = 200; boss.h = 210;
-        boss.y = GROUND_Y - 230;
-        boss.maxHp = 20; boss.hp = 20;
-        boss.atkCd = 60;
-        boss.hitFlash = 20;
-        popup(boss.x - 40, boss.y - 30, "Я ВЕРНУЛАСЬ!", "#ff3070");
+        boss.w = 200; boss.h = 210; boss.y = GROUND_Y - 230;
+        boss.maxHp = 20; boss.hp = 20; boss.atkCd = 60; boss.hitFlash = 20;
+        popup(boss.x - 40, boss.y - 30, "I'M BACK!", NEON.pink);
+        SFX.bossAppear();
     } else {
-        boss.alive = false;
-        bossShots = [];
-        gameState = "win";
+        boss.alive = false; bossShots = [];
+        gameState = "win"; SFX.win();
     }
 }
-
 function updateBoss() {
     if (!boss || !boss.alive) return;
     boss.t++;
     if (boss.hitFlash > 0) boss.hitFlash--;
-
-    // покачивание
     boss.y = (GROUND_Y - (boss.stage === 1 ? 150 : 230)) + Math.sin(boss.t * 0.05) * 20;
 
-    // атака снарядами
-    boss.atkCd--;
-    if (boss.atkCd <= 0) {
+    if (--boss.atkCd <= 0) {
         boss.atkCd = boss.stage === 1 ? 90 : 55;
         const cx = boss.x + boss.w/2, cy = boss.y + boss.h/2;
         const dx = (player.x + player.w/2) - cx, dy = (player.y + player.h/2) - cy;
         const d = Math.hypot(dx, dy) || 1;
         const sp = boss.stage === 1 ? 4 : 6;
         bossShots.push({ x: cx, y: cy, w: 18, h: 18, vx: dx/d*sp, vy: dy/d*sp });
-        if (boss.stage === 2) { // веерная атака во 2 стадии
+        if (boss.stage === 2) {
             bossShots.push({ x: cx, y: cy, w: 18, h: 18, vx: dx/d*sp - 1.5, vy: dy/d*sp - 1.5 });
             bossShots.push({ x: cx, y: cy, w: 18, h: 18, vx: dx/d*sp + 1.5, vy: dy/d*sp + 1.5 });
         }
     }
-
     for (const b of bossShots) {
         b.x += b.vx; b.y += b.vy;
         if (b.x < cameraX - 60 || b.x > cameraX + W + 60 || b.y > H + 40) b.dead = true;
@@ -539,16 +530,13 @@ function updatePopups() {
     popups = popups.filter(p => p.life > 0);
 }
 
-// ================= ОТРИСОВКА =================
+// ================= DRAW =================
 function draw() {
     drawBackground();
+    if (gameState === "start") { drawStart(); drawScanlines(); return; }
 
-    if (gameState === "start") { drawStart(); return; }
-
-    // мир (со смещением камеры)
     ctx.save();
     ctx.translate(-cameraX, 0);
-
     drawZoneDecor();
     for (const c of cans) drawCan(c);
     for (const a of apples) drawApple(a);
@@ -560,163 +548,144 @@ function draw() {
     for (const b of bossShots) drawBossShot(b);
     drawPlayer();
     for (const p of popups) drawPopup(p);
-
     ctx.restore();
 
     drawHUD();
-    if (gameState === "dead") drawEnd("GAME OVER", "#ff4040");
-    if (gameState === "win")  drawEnd("YOU WIN!", "#40ff80");
+    if (gameState === "dead") drawEnd("GAME OVER", NEON.pink);
+    if (gameState === "win")  drawEnd("YOU WIN!", NEON.green);
+    drawScanlines();
 }
 
-// Фон меняется от светлого города к мрачной пещере
 function drawBackground() {
     const z = gameState === "start" ? "city" : zoneAt(cameraX + W/2);
     let sky1, sky2, ground;
-    if (z === "city")   { sky1 = "#87CEEB"; sky2 = "#b8e6ff"; ground = "#777"; }
-    else if (z==="forest"){ sky1 = "#4a6b4a"; sky2 = "#7fae74"; ground = "#4b3a2a"; }
-    else if (z==="lab") { sky1 = "#2b2f45"; sky2 = "#454b6b"; ground = "#3a3f52"; }
-    else                { sky1 = "#0a0a14"; sky2 = "#1a1030"; ground = "#1c1420"; }
-
+    if (z === "city")        { sky1 = "#1a1a4e"; sky2 = "#3b2a80"; ground = "#20143a"; }
+    else if (z === "forest") { sky1 = "#06231a"; sky2 = "#0f4030"; ground = "#0a2418"; }
+    else if (z === "lab")    { sky1 = "#12122b"; sky2 = "#241a44"; ground = "#161628"; }
+    else                     { sky1 = "#05000a"; sky2 = "#160828"; ground = "#0d0616"; }
     const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
     g.addColorStop(0, sky1); g.addColorStop(1, sky2);
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, GROUND_Y);
     ctx.fillStyle = ground; ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+    // neon horizon line (retro grid vibe)
+    ctx.strokeStyle = NEON.magenta; ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.moveTo(0, GROUND_Y); ctx.lineTo(W, GROUND_Y); ctx.stroke();
+    ctx.globalAlpha = 1;
 }
 
-// Декор локаций (здания, деревья, стены, кости)
+function drawScanlines() {
+    ctx.save();
+    ctx.globalAlpha = 0.10; ctx.fillStyle = "#000";
+    for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
+    ctx.restore();
+}
+
 function drawZoneDecor() {
-    // Город: здания
+    // City: neon buildings
     for (let x = 0; x < ZONES[0].end; x += 220) {
         const h = 120 + ((x*37) % 90);
-        ctx.fillStyle = "#5a6b80"; ctx.fillRect(x + 40, GROUND_Y - h, 140, h);
-        ctx.fillStyle = "#ffd97a";
+        ctx.fillStyle = "#241a4a"; ctx.fillRect(x + 40, GROUND_Y - h, 140, h);
+        ctx.fillStyle = NEON.cyan;
         for (let wy = GROUND_Y - h + 20; wy < GROUND_Y - 20; wy += 40)
             for (let wx = x + 60; wx < x + 160; wx += 40)
-                ctx.fillRect(wx, wy, 18, 24);
+                ctx.fillRect(wx, wy, 16, 22);
     }
-    // Ворота между городом и лесом
     drawGate(ZONES[0].end - 30);
-
-    // Лес: деревья
+    // Forest: trees
     for (let x = ZONES[0].end; x < ZONES[1].end; x += 160) {
-        ctx.fillStyle = "#5b3a1e"; ctx.fillRect(x + 60, GROUND_Y - 120, 24, 120);
-        ctx.fillStyle = "#2f5d2f"; ctx.beginPath();
+        ctx.fillStyle = "#3a2510"; ctx.fillRect(x + 60, GROUND_Y - 120, 24, 120);
+        ctx.fillStyle = "#12592f"; ctx.beginPath();
         ctx.arc(x + 72, GROUND_Y - 130, 55, 0, Math.PI*2); ctx.fill();
     }
-
-    // Лаборатория: стены/двери
+    // Lab: walls with neon strips
     for (let x = ZONES[1].end; x < ZONES[2].end; x += 200) {
-        ctx.fillStyle = "#2f3550"; ctx.fillRect(x + 30, GROUND_Y - 200, 160, 200);
-        ctx.fillStyle = "#0ff"; ctx.globalAlpha = 0.35;
-        ctx.fillRect(x + 50, GROUND_Y - 160, 120, 4);
-        ctx.fillRect(x + 50, GROUND_Y - 90, 120, 4);
+        ctx.fillStyle = "#20243f"; ctx.fillRect(x + 30, GROUND_Y - 200, 160, 200);
+        ctx.fillStyle = NEON.cyan; ctx.globalAlpha = 0.5;
+        ctx.fillRect(x + 50, GROUND_Y - 160, 120, 3);
+        ctx.fillRect(x + 50, GROUND_Y - 90, 120, 3);
         ctx.globalAlpha = 1;
-        ctx.fillStyle = "#1a2030"; ctx.fillRect(x + 90, GROUND_Y - 110, 40, 110);
+        ctx.fillStyle = "#0d1120"; ctx.fillRect(x + 90, GROUND_Y - 110, 40, 110);
     }
-
-    // Пещера: сталактиты + кости
+    // Cave: stalactites + bones
     for (let x = ZONES[2].end; x < ZONES[3].end; x += 120) {
-        ctx.fillStyle = "#241a30";
-        ctx.beginPath();
-        ctx.moveTo(x, 0); ctx.lineTo(x + 40, 0); ctx.lineTo(x + 20, 70); ctx.closePath(); ctx.fill();
-        ctx.fillStyle = "#c9c2b0";
-        ctx.fillRect(x + 30, GROUND_Y + 20, 26, 5);
-        ctx.beginPath(); ctx.arc(x + 30, GROUND_Y + 22, 5, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = "#1a1026";
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + 40, 0); ctx.lineTo(x + 20, 70); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "#8a8474"; ctx.fillRect(x + 30, GROUND_Y + 20, 26, 5);
     }
-    // Чёрный замок в глубине
-    ctx.fillStyle = "#150c22";
-    ctx.fillRect(BOSS_GATE_X - 200, GROUND_Y - 260, 700, 260);
-    ctx.fillStyle = "#0d0716";
+    // Black castle
+    ctx.fillStyle = "#0d0618"; ctx.fillRect(BOSS_GATE_X - 200, GROUND_Y - 260, 700, 260);
+    ctx.fillStyle = "#070312";
     for (let i = 0; i < 5; i++) ctx.fillRect(BOSS_GATE_X - 200 + i*160, GROUND_Y - 300, 60, 60);
 }
-
 function drawGate(x) {
-    ctx.fillStyle = "#4a4a4a";
-    ctx.fillRect(x, GROUND_Y - 150, 16, 150);
+    ctx.fillStyle = "#333"; ctx.fillRect(x, GROUND_Y - 150, 16, 150);
     ctx.fillRect(x + 60, GROUND_Y - 150, 16, 150);
     ctx.fillRect(x - 6, GROUND_Y - 160, 90, 16);
 }
 
 function drawCan(c) {
-    let dx = c.shake > 0 ? Math.sin(c.shake * 1.6) * 4 : 0;
-    ctx.fillStyle = "#708090"; ctx.fillRect(c.x + dx, c.y, c.w, c.h);
-    ctx.fillStyle = "#5a6673";
+    const dx = c.shake > 0 ? Math.sin(c.shake * 1.6) * 4 : 0;
+    ctx.fillStyle = "#5a6673"; ctx.fillRect(c.x + dx, c.y, c.w, c.h);
+    ctx.fillStyle = "#454f5a";
     for (let i = 1; i < 4; i++) ctx.fillRect(c.x + dx, c.y + i*15, c.w, 3);
-    ctx.fillStyle = c.kicked ? "#455" : "#555"; // крышка отлетает после пинка
+    ctx.fillStyle = c.kicked ? "#333" : "#444";
     const lidY = c.kicked ? c.y - 16 : c.y - 5;
     ctx.fillRect(c.x - 4 + dx, lidY, c.w + 8, 8);
 }
-
 function drawApple(a) {
     if (a.taken || a.gone) return;
-    ctx.fillStyle = "#e03030"; ctx.beginPath();
+    ctx.fillStyle = "#e83030"; ctx.beginPath();
     ctx.arc(a.x + a.w/2, a.y + a.h/2, a.w/2, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = "#5b3a1e"; ctx.fillRect(a.x + a.w/2 - 1, a.y - 4, 3, 6);
-    ctx.fillStyle = "#4caf50"; ctx.fillRect(a.x + a.w/2 + 2, a.y - 3, 6, 3);
+    ctx.fillStyle = "#3a2510"; ctx.fillRect(a.x + a.w/2 - 1, a.y - 4, 3, 6);
+    ctx.fillStyle = "#3fae50"; ctx.fillRect(a.x + a.w/2 + 2, a.y - 3, 6, 3);
 }
-
 function drawChest(ch) {
-    ctx.fillStyle = ch.opened ? "#5a3a1a" : "#8a5a2a";
-    ctx.fillRect(ch.x, ch.y, ch.w, ch.h);
-    ctx.fillStyle = "#c9a227";
-    ctx.fillRect(ch.x, ch.y + ch.h/2 - 3, ch.w, 6);
+    ctx.fillStyle = ch.opened ? "#5a3a1a" : "#8a5a2a"; ctx.fillRect(ch.x, ch.y, ch.w, ch.h);
+    ctx.fillStyle = NEON.yellow; ctx.fillRect(ch.x, ch.y + ch.h/2 - 3, ch.w, 6);
     if (!ch.opened) ctx.fillRect(ch.x + ch.w/2 - 4, ch.y + ch.h/2 - 6, 8, 12);
     ctx.strokeStyle = "#000"; ctx.strokeRect(ch.x, ch.y, ch.w, ch.h);
 }
-
 function drawItem(it) {
     if (it.type === "burger") {
         ctx.fillStyle = "#DEB887"; ctx.fillRect(it.x, it.y, it.w, 6);
         ctx.fillStyle = "#8b5a2b"; ctx.fillRect(it.x, it.y + 6, it.w, 6);
         ctx.fillStyle = "#6cbf3f"; ctx.fillRect(it.x, it.y + 12, it.w, 3);
         ctx.fillStyle = "#DEB887"; ctx.fillRect(it.x, it.y + 15, it.w, 5);
-    } else if (it.type === "laser") {
-        ctx.fillStyle = "#00e5ff"; ctx.fillRect(it.x, it.y + 10, it.w, 10);
-        ctx.fillStyle = "#0091a7"; ctx.fillRect(it.x + it.w - 8, it.y + 6, 8, 18);
-        ctx.fillStyle = "#fff"; ctx.font = "10px Arial"; ctx.fillText("⚡", it.x + 6, it.y + 8);
-    } else if (it.type === "tube") {
-        ctx.fillStyle = "#d0d0d0"; ctx.fillRect(it.x, it.y, it.w, it.h);
-        ctx.fillStyle = "#ff8c00"; ctx.fillRect(it.x, it.y, it.w, 6);
-        ctx.fillStyle = "#888"; ctx.fillRect(it.x + 3, it.y + it.h - 4, it.w - 6, 4);
+    } else if (it.type === "potion") {
+        ctx.fillStyle = "#888"; ctx.fillRect(it.x + it.w/2 - 3, it.y, 6, 6);         // cork
+        ctx.fillStyle = NEON.magenta; ctx.fillRect(it.x + 2, it.y + 6, it.w - 4, it.h - 6); // liquid
+        ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.fillRect(it.x + 4, it.y + 8, 3, it.h - 12);
+    } else if (it.type === "apple") {
+        ctx.fillStyle = "#e83030"; ctx.beginPath();
+        ctx.arc(it.x + it.w/2, it.y + it.h/2, it.w/2, 0, Math.PI*2); ctx.fill();
     }
 }
 
 function drawEnemy(e) {
     ctx.save();
     if (e.hitFlash > 0 && Math.floor(e.hitFlash/2)%2 === 0) ctx.globalAlpha = 0.4;
-
     if (e.type === "raccoon") {
         ctx.fillStyle = "#555"; ctx.fillRect(e.x, e.y, e.w, e.h);
         ctx.fillStyle = "#222"; ctx.fillRect(e.x + 6, e.y + 6, 10, 8); ctx.fillRect(e.x + e.w - 16, e.y + 6, 10, 8);
         ctx.fillStyle = "#fff"; ctx.fillRect(e.x + 8, e.y + 8, 3, 3); ctx.fillRect(e.x + e.w - 12, e.y + 8, 3, 3);
-        ctx.fillStyle = "#333"; // хвост в полоску
-        for (let i = 0; i < 3; i++) ctx.fillRect(e.x - 8, e.y + 4 + i*8, 8, 4);
-    }
-    else if (e.type === "squirrel") {
+        ctx.fillStyle = "#333"; for (let i=0;i<3;i++) ctx.fillRect(e.x - 8, e.y + 4 + i*8, 8, 4);
+    } else if (e.type === "squirrel") {
         ctx.fillStyle = "#a0522d"; ctx.fillRect(e.x, e.y, e.w, e.h);
-        ctx.fillStyle = "#8b4513"; ctx.beginPath();
-        ctx.arc(e.x - 4, e.y + 4, 12, 0, Math.PI*2); ctx.fill(); // пушистый хвост
+        ctx.fillStyle = "#8b4513"; ctx.beginPath(); ctx.arc(e.x - 4, e.y + 4, 12, 0, Math.PI*2); ctx.fill();
         ctx.fillStyle = "#000"; ctx.fillRect(e.x + e.w - 12, e.y + 6, 4, 4);
-    }
-    else if (e.type === "zombie") {
+    } else if (e.type === "zombie") {
         ctx.fillStyle = "#4a7a3a"; ctx.fillRect(e.x, e.y, e.w, e.h);
         ctx.fillStyle = "#2f4f2f"; ctx.fillRect(e.x, e.y + 30, e.w, 6);
         ctx.fillStyle = "#c00"; ctx.fillRect(e.x + 8, e.y + 12, 8, 6); ctx.fillRect(e.x + e.w - 16, e.y + 12, 8, 6);
-        // полоска HP
         ctx.fillStyle = "#000"; ctx.fillRect(e.x, e.y - 8, e.w, 4);
-        ctx.fillStyle = "#0f0"; ctx.fillRect(e.x, e.y - 8, e.w * (e.hp/2), 4);
-    }
-    else if (e.type === "tentacle") {
-        const hh = e.h0 || 0;
-        ctx.fillStyle = "#2b3fbf";
-        const bx = e.x, by = GROUND_Y - hh;
-        ctx.fillRect(bx, by, e.w, hh);
-        // присоски
+        ctx.fillStyle = NEON.green; ctx.fillRect(e.x, e.y - 8, e.w * (e.hp/2), 4);
+    } else if (e.type === "tentacle") {
+        const hh = e.h0 || 0, bx = e.x, by = GROUND_Y - hh;
+        ctx.fillStyle = "#2b3fbf"; ctx.fillRect(bx, by, e.w, hh);
         ctx.fillStyle = "#5a6fe0";
         for (let y = by + 10; y < GROUND_Y - 6; y += 16) ctx.fillRect(bx + e.w/2 - 4, y, 8, 8);
         if (hh > 30) { ctx.fillStyle = "#000"; ctx.fillRect(bx + 8, by + 8, 6, 6); ctx.fillRect(bx + e.w - 14, by + 8, 6, 6); }
-    }
-    else if (e.type === "skeleton") {
+    } else if (e.type === "skeleton") {
         ctx.fillStyle = "#e8e8e0"; ctx.fillRect(e.x, e.y, e.w, e.h);
         ctx.fillStyle = "#000"; ctx.fillRect(e.x + 6, e.y + 6, 6, 6); ctx.fillRect(e.x + e.w - 12, e.y + 6, 6, 6);
         ctx.fillRect(e.x + 6, e.y + 20, e.w - 12, 3);
@@ -725,13 +694,22 @@ function drawEnemy(e) {
 }
 
 function drawShot(s) {
-    ctx.fillStyle = "#00e5ff";
-    ctx.fillRect(s.x, s.y, s.w, s.h);
-    ctx.fillStyle = "#fff"; ctx.fillRect(s.x + s.w - 4, s.y + 1, 4, s.h - 2);
+    ctx.save();
+    ctx.translate(s.x + s.w/2, s.y + s.h/2);
+    ctx.rotate(s.spin);
+    if (s.kind === "bone") {
+        ctx.fillStyle = "#f5f2e6";
+        ctx.fillRect(-s.w/2 + 3, -2, s.w - 6, 4);          // shaft
+        ctx.beginPath(); ctx.arc(-s.w/2 + 3, -3, 3, 0, Math.PI*2); ctx.arc(-s.w/2 + 3, 3, 3, 0, Math.PI*2);
+        ctx.arc(s.w/2 - 3, -3, 3, 0, Math.PI*2); ctx.arc(s.w/2 - 3, 3, 3, 0, Math.PI*2); ctx.fill();
+    } else {
+        ctx.fillStyle = "#888"; ctx.fillRect(-2, -s.h/2, 4, 4);
+        ctx.fillStyle = NEON.magenta; ctx.fillRect(-s.w/2 + 3, -s.h/2 + 4, s.w - 6, s.h - 4);
+    }
+    ctx.restore();
 }
-
 function drawBossShot(b) {
-    ctx.fillStyle = "#b060ff";
+    ctx.fillStyle = NEON.purple;
     ctx.beginPath(); ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = "#e0b0ff";
     ctx.beginPath(); ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/4, 0, Math.PI*2); ctx.fill();
@@ -739,59 +717,87 @@ function drawBossShot(b) {
 
 function drawBoss() {
     if (!boss.alive) return;
+    const cx = boss.x + boss.w/2, cy = boss.y + boss.h/2, r = boss.w/2;
     ctx.save();
     if (boss.hitFlash > 0 && Math.floor(boss.hitFlash/2)%2 === 0) ctx.globalAlpha = 0.5;
-    const cx = boss.x + boss.w/2, cy = boss.y + boss.h/2, r = boss.w/2;
-    // сгусток тёмной материи (пульсирующие круги)
-    const grad = ctx.createRadialGradient(cx, cy, 5, cx, cy, r);
-    grad.addColorStop(0, "#7a2fbf"); grad.addColorStop(0.6, "#3a1060"); grad.addColorStop(1, "#0a0014");
+    // Dark energy body (wobbling void)
+    const grad = ctx.createRadialGradient(cx, cy, 4, cx, cy, r);
+    grad.addColorStop(0, "#5a0e8a"); grad.addColorStop(0.5, "#26063f"); grad.addColorStop(1, "#050008");
     ctx.fillStyle = grad;
     ctx.beginPath();
-    for (let a = 0; a < Math.PI*2; a += 0.3) {
-        const rr = r + Math.sin(a*4 + boss.t*0.1) * (boss.stage===2?14:8);
+    for (let a = 0; a < Math.PI*2; a += 0.25) {
+        const rr = r + Math.sin(a*5 + boss.t*0.12) * (boss.stage===2?16:9);
         const px = cx + Math.cos(a)*rr, py = cy + Math.sin(a)*rr;
         a === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
     }
     ctx.closePath(); ctx.fill();
-    // глаза
-    ctx.fillStyle = "#ff3070";
-    ctx.beginPath(); ctx.arc(cx - r*0.35, cy - 6, r*0.14, 0, Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(cx + r*0.35, cy - 6, r*0.14, 0, Math.PI*2); ctx.fill();
+    // Swirling energy arcs
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(255,0,255,0.5)";
+    ctx.beginPath(); ctx.arc(cx, cy, r*0.55, boss.t*0.05, boss.t*0.05 + 2); ctx.stroke();
+    ctx.strokeStyle = "rgba(0,229,255,0.45)";
+    ctx.beginPath(); ctx.arc(cx, cy, r*0.38, -boss.t*0.07, -boss.t*0.07 + 2.4); ctx.stroke();
+    // Glowing eyes
+    ctx.shadowColor = NEON.pink; ctx.shadowBlur = 12; ctx.fillStyle = NEON.pink;
+    ctx.beginPath(); ctx.arc(cx - r*0.32, cy + 4, r*0.12, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + r*0.32, cy + 4, r*0.12, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+    // "The Helmet" (colander-style) on top
+    const hy = cy - r*0.30;
+    ctx.fillStyle = "#b8b8c2";
+    ctx.beginPath(); ctx.arc(cx, hy, r*0.7, Math.PI, Math.PI*2); ctx.closePath(); ctx.fill(); // dome (top half)
+    ctx.fillStyle = "#9a9aa6"; ctx.fillRect(cx - r*0.78, hy - 3, r*1.56, 6);                  // rim
+    ctx.fillStyle = "#e8e8f0"; ctx.beginPath(); ctx.arc(cx - r*0.24, hy - r*0.28, r*0.1, 0, Math.PI*2); ctx.fill(); // shine
+    ctx.fillStyle = "#6f6f7a";                                                                // colander holes
+    for (let i = -2; i <= 2; i++) ctx.fillRect(cx + i*r*0.22 - 2, hy - r*0.34, 4, 4);
+    ctx.fillStyle = "#c8c8d2"; ctx.fillRect(cx - 3, hy - r*0.72, 6, 8);                        // top knob
     ctx.restore();
 
-    // HP босса
-    const bw = 300, bx = cameraX + W/2 - bw/2, by = 24;
+    // Boss HP bar (screen space)
+    const bw = 300, bx = cameraX + W/2 - bw/2, by = 30;
     ctx.fillStyle = "#000"; ctx.fillRect(bx, by, bw, 14);
-    ctx.fillStyle = boss.stage === 1 ? "#b060ff" : "#ff3070";
+    ctx.fillStyle = boss.stage === 1 ? NEON.purple : NEON.pink;
     ctx.fillRect(bx, by, bw * Math.max(0, boss.hp/boss.maxHp), 14);
     ctx.strokeStyle = "#fff"; ctx.strokeRect(bx, by, bw, 14);
-    ctx.fillStyle = "#fff"; ctx.font = "12px Arial"; ctx.textAlign = "center";
-    ctx.fillText(boss.stage === 1 ? "DARK MATTER" : "DARK MATTER — ФИНАЛ", cameraX + W/2, by - 4);
+    ctx.fillStyle = "#fff"; ctx.font = "12px " + FONT; ctx.textAlign = "center";
+    ctx.fillText(boss.stage === 1 ? "MISHA" : "MISHA — FINAL", cameraX + W/2, by - 4);
     ctx.textAlign = "left";
 }
 
+// Player: Luigi-style guy, no mustache, casual clothes
 function drawPlayer() {
-    const p = player;
+    const p = player, x = p.x, y = p.y, w = p.w, h = p.h, flip = p.facing === -1;
     ctx.save();
     if (p.hurtCd > 0 && Math.floor(p.hurtCd/3)%2 === 0) ctx.globalAlpha = 0.4;
-    const flip = p.facing === -1;
-    // тело — пиксельный медведь Миша
-    ctx.fillStyle = p.color;
-    ctx.fillRect(p.x, p.y, p.w, p.h);
-    // мордочка
-    ctx.fillStyle = "#bfe0ff"; ctx.fillRect(p.x + 8, p.y + 12, p.w - 16, 22);
-    // уши
-    ctx.fillStyle = p.color;
-    ctx.fillRect(p.x + 2, p.y - 8, 14, 14); ctx.fillRect(p.x + p.w - 16, p.y - 8, 14, 14);
-    // глаза
-    ctx.fillStyle = "#000";
-    const ex = flip ? p.x + 10 : p.x + p.w - 22;
-    ctx.fillRect(ex, p.y + 18, 5, 5); ctx.fillRect(ex + (flip?10:-10), p.y + 18, 5, 5);
-    // нога-пинок
+    // black boots
+    ctx.fillStyle = "#111";
+    ctx.fillRect(x, y + h - 10, w/2 - 2, 10);
+    ctx.fillRect(x + w/2 + 2, y + h - 10, w/2 - 2, 10);
+    // blue pants
+    ctx.fillStyle = "#2a4bd8"; ctx.fillRect(x + 3, y + 48, w - 6, h - 58);
+    ctx.fillStyle = "#1f3aa8"; ctx.fillRect(x + w/2 - 1, y + 52, 2, h - 62);
+    // light t-shirt + arms
+    ctx.fillStyle = "#f2efe4";
+    ctx.fillRect(x + 2, y + 26, w - 4, 24);
+    ctx.fillRect(x - 4, y + 28, 6, 18); ctx.fillRect(x + w - 2, y + 28, 6, 18);
+    // hands (light skin)
+    ctx.fillStyle = "#f0c39c";
+    ctx.fillRect(x - 4, y + 44, 6, 5); ctx.fillRect(x + w - 2, y + 44, 6, 5);
+    // face (light skin)
+    ctx.fillRect(x + 6, y + 10, w - 12, 18);
+    // dark hair
+    ctx.fillStyle = "#3a2a1a";
+    ctx.fillRect(x + 4, y + 2, w - 8, 9);
+    ctx.fillRect(x + 4, y + 10, 4, 7); ctx.fillRect(x + w - 8, y + 10, 4, 7);
+    // eyes
+    ctx.fillStyle = "#111";
+    const ex = flip ? x + 9 : x + w - 17;
+    ctx.fillRect(ex, y + 16, 4, 4); ctx.fillRect(ex + (flip ? 8 : -8), y + 16, 4, 4);
+    // kicking leg
     if (p.isKicking) {
-        ctx.fillStyle = "#ff3b30";
-        const kx = flip ? p.x - 24 : p.x + p.w;
-        ctx.fillRect(kx, p.y + 48, 24, 16);
+        const kx = flip ? x - 20 : x + w - 4;
+        ctx.fillStyle = "#2a4bd8"; ctx.fillRect(kx, y + 46, 22, 12);
+        ctx.fillStyle = "#111"; ctx.fillRect(flip ? kx - 6 : kx + 18, y + 46, 6, 12);
     }
     ctx.restore();
 }
@@ -799,68 +805,87 @@ function drawPlayer() {
 function drawPopup(p) {
     ctx.globalAlpha = Math.min(1, p.life/25);
     ctx.fillStyle = p.color;
-    ctx.font = "bold 18px Arial"; ctx.textAlign = "center";
+    ctx.font = "bold 18px " + FONT; ctx.textAlign = "center";
     ctx.fillText(p.text, p.x, p.y);
     ctx.textAlign = "left"; ctx.globalAlpha = 1;
 }
 
 // ================= HUD =================
 function drawHUD() {
-    // Полоска здоровья
+    // HP bar
     ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(14, 14, 204, 22);
     ctx.fillStyle = "#c00"; ctx.fillRect(16, 16, 200, 18);
-    ctx.fillStyle = "#2ecc40"; ctx.fillRect(16, 16, 200 * (player.hp/player.maxHp), 18);
+    ctx.fillStyle = NEON.green; ctx.fillRect(16, 16, 200 * (player.hp/player.maxHp), 18);
     ctx.strokeStyle = "#fff"; ctx.strokeRect(16, 16, 200, 18);
-    ctx.fillStyle = "#fff"; ctx.font = "bold 13px Arial";
-    ctx.fillText("❤ " + Math.ceil(player.hp), 20, 30);
+    ctx.fillStyle = "#fff"; ctx.font = "bold 13px " + FONT;
+    ctx.fillText("HP " + Math.ceil(player.hp), 22, 30);
 
-    // Инвентарь (иконки без текста)
+    // Counters: ammo (bones, potions) + food (burgers, apples)
     let ix = 240;
-    const inv = [["🍔", player.inv.burger], ["🍎", player.inv.apple], ["🧪", player.inv.tube]];
-    ctx.font = "20px Arial";
-    for (const [icon, n] of inv) {
-        ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.fillRect(ix, 14, 54, 26);
-        ctx.fillStyle = "#fff"; ctx.fillText(icon, ix + 4, 34);
-        ctx.font = "bold 14px Arial"; ctx.fillText("×" + n, ix + 30, 32); ctx.font = "20px Arial";
-        ix += 62;
+    const row = [["🦴", player.ammo.bone], ["🧪", player.ammo.potion], ["🍔", player.inv.burger], ["🍎", player.inv.apple]];
+    ctx.font = "18px " + FONT;
+    for (const [icon, n] of row) {
+        ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.fillRect(ix, 14, 56, 26);
+        ctx.fillText(icon, ix + 4, 33);
+        ctx.fillStyle = "#fff"; ctx.font = "bold 14px " + FONT; ctx.fillText("x" + n, ix + 28, 32); ctx.font = "18px " + FONT;
+        ix += 64;
     }
 
-    // Индикатор локации
-    const names = { city: "🏙️ ГОРОД", forest: "🌲 ЛЕС", lab: "🧪 ЛАБОРАТОРИЯ", cave: "🕳️ ПЕЩЕРА" };
-    ctx.fillStyle = "rgba(0,0,0,0.4)";
-    ctx.font = "bold 16px Arial";
-    const zn = names[zoneAt(player.x)] || "";
-    ctx.fillStyle = "#fff"; ctx.textAlign = "right";
-    ctx.fillText(zn, W - 16, 30); ctx.textAlign = "left";
+    // Location tag
+    const names = { city: "CITY", forest: "FOREST", lab: "LAB", cave: "CAVE" };
+    ctx.fillStyle = NEON.cyan; ctx.font = "bold 16px " + FONT; ctx.textAlign = "right";
+    ctx.fillText(names[zoneAt(player.x)] || "", W - 16, 30); ctx.textAlign = "left";
+}
+
+function neonText(text, x, y, size, color) {
+    ctx.font = "bold " + size + "px " + FONT;
+    ctx.shadowColor = color; ctx.shadowBlur = 14;
+    ctx.fillStyle = color; ctx.fillText(text, x, y);
+    ctx.shadowBlur = 0;
 }
 
 function drawStart() {
-    ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(0, 0, W, H);
     ctx.textAlign = "center";
-    ctx.fillStyle = "#b060ff"; ctx.font = "bold 52px Arial";
-    ctx.fillText("DARK ENERGY", W/2, 150);
-    ctx.fillStyle = "#fff"; ctx.font = "20px Arial";
-    ctx.fillText("Миша идёт сквозь Город, Лес, Лабораторию и Пещеру", W/2, 200);
-    ctx.fillText("к источнику зла — Тёмной Материи.", W/2, 228);
-    ctx.font = "18px Arial"; ctx.fillStyle = "#9fd";
-    ctx.fillText("➡️/⬅️ — идти    🦵 — пнуть    ⚡ — стрелять    🍔 — поесть", W/2, 290);
-    ctx.font = "bold 26px Arial"; ctx.fillStyle = "#ffd700";
-    ctx.fillText("НАЖМИ, ЧТОБЫ НАЧАТЬ", W/2, 360);
+    neonText("DARK ENERGY", W/2, 78, 46, NEON.purple);
+    ctx.fillStyle = "#fff"; ctx.font = "13px " + FONT;
+    ctx.fillText("Fight through CITY - FOREST - LAB - CAVE to the source of evil.", W/2, 108);
+
+    // Control legend (icon + what it does)
+    ctx.textAlign = "left";
+    const lx = W/2 - 190, top = 150, step = 40;
+    const legend = [
+        ["➡️ ⬅️", "MOVE", "(D / A)"],
+        ["🦵",     "KICK", "(SPACE)"],
+        ["🦴",     "THROW BONE / POTION", "(F)"],
+        ["🍔",     "EAT — HEAL", "(E)"]
+    ];
+    ctx.font = "22px " + FONT;
+    legend.forEach((row, i) => {
+        const y = top + i*step;
+        ctx.textAlign = "left";
+        ctx.fillStyle = "#fff"; ctx.fillText(row[0], lx, y);
+        ctx.fillStyle = NEON.green; ctx.font = "bold 18px " + FONT; ctx.fillText(row[1], lx + 90, y);
+        ctx.fillStyle = "#8ad"; ctx.font = "14px " + FONT; ctx.fillText(row[2], lx + 300, y);
+        ctx.font = "22px " + FONT;
+    });
+
+    ctx.textAlign = "center";
+    if (Math.floor(tick/30) % 2 === 0) neonText("TAP / PRESS TO START", W/2, 400, 24, NEON.yellow);
     ctx.textAlign = "left";
 }
 
 function drawEnd(text, color) {
-    ctx.fillStyle = "rgba(0,0,0,0.65)"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(0,0,0,0.68)"; ctx.fillRect(0, 0, W, H);
     ctx.textAlign = "center";
-    ctx.fillStyle = color; ctx.font = "bold 60px Arial";
-    ctx.fillText(text, W/2, H/2 - 10);
-    ctx.fillStyle = "#fff"; ctx.font = "20px Arial";
-    ctx.fillText("Нажми, чтобы играть заново", W/2, H/2 + 40);
+    neonText(text, W/2, H/2 - 6, 58, color);
+    ctx.fillStyle = "#fff"; ctx.font = "18px " + FONT;
+    ctx.fillText("TAP / PRESS TO PLAY AGAIN", W/2, H/2 + 40);
     ctx.textAlign = "left";
 }
 
-// ================= ЦИКЛ =================
-function loop() { update(); draw(); requestAnimationFrame(loop); }
+// ================= LOOP =================
+function loop() { update(); draw(); tick += (gameState === "start" ? 1 : 0); requestAnimationFrame(loop); }
 loop();
 </script>
 </body>
