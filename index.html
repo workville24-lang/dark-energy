@@ -298,13 +298,10 @@ function kickCan(c) {
 
 function openChest(ch) {
     ch.opened = true;
-    player.ammo.bone += 5;
+    player.ammo.bone += 5;   // bones and potions come in equal amounts (+5 each)
     updateShootBtn();
     popup(ch.x, ch.y - 20, "+5 BONES", NEON.cyan);
     SFX.ammo();
-    const s = makeEnemy("skeleton", ch.x, GROUND_Y - 60);
-    s.vy = -7; s.vx = (Math.random() < 0.5 ? -1 : 1) * 2;
-    enemies.push(s);
 }
 
 function kickEnemy(e) {
@@ -400,7 +397,7 @@ function updateItems() {
         const rest = GROUND_Y - it.h;
         if (it.y > rest) { it.y = rest; it.vy = 0; }
         if (aabb(player, it)) {
-            if (it.type === "potion") { player.ammo.potion += 3; updateShootBtn(); popup(player.x, player.y-20, "+POTION", NEON.magenta); SFX.ammo(); }
+            if (it.type === "potion") { player.ammo.potion += 5; updateShootBtn(); popup(player.x, player.y-20, "+5 POTION", NEON.magenta); SFX.ammo(); }
             else { player.inv[it.type]++; popup(player.x, player.y-20, "+1", "#fff"); SFX.pickup(); }
             it.dead = true;
         }
@@ -483,7 +480,7 @@ function updateShots() {
 // ================= BOSS =================
 function spawnBoss() {
     boss = { x: BOSS_GATE_X + 340, y: GROUND_Y - 150, w: 120, h: 130,
-             hp: 12, maxHp: 12, stage: 1, alive: true, hitFlash: 0, t: 0, atkCd: 90 };
+             hp: 8, maxHp: 8, stage: 1, alive: true, hitFlash: 0, t: 0, atkCd: 90 };
     popup(BOSS_GATE_X + 200, 120, "MISHA", NEON.purple);
     SFX.bossAppear();
 }
@@ -491,7 +488,7 @@ function bossPhaseEnd() {
     if (boss.stage === 1) {
         boss.stage = 2;
         boss.w = 200; boss.h = 210; boss.y = GROUND_Y - 230;
-        boss.maxHp = 20; boss.hp = 20; boss.atkCd = 60; boss.hitFlash = 20;
+        boss.maxHp = 12; boss.hp = 12; boss.atkCd = 60; boss.hitFlash = 20;
         popup(boss.x - 40, boss.y - 30, "I'M BACK!", NEON.pink);
         SFX.bossAppear();
     } else {
@@ -612,6 +609,14 @@ function drawZoneDecor() {
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + 40, 0); ctx.lineTo(x + 20, 70); ctx.closePath(); ctx.fill();
         ctx.fillStyle = "#8a8474"; ctx.fillRect(x + 30, GROUND_Y + 20, 26, 5);
     }
+    // Starfield across the cave / boss arena
+    for (let i = 0; i < 140; i++) {
+        const sx = ZONES[2].end + (i * 213) % (ZONES[3].end - ZONES[2].end);
+        const sy = ((i * 97) % 320) + 8;
+        ctx.fillStyle = (i % 4 === 0) ? "rgba(180,240,255,0.9)" : "rgba(120,230,220,0.55)";
+        const ss = (i % 6 === 0) ? 2 : 1;
+        ctx.fillRect(sx, sy, ss, ss);
+    }
     // Black castle
     ctx.fillStyle = "#0d0618"; ctx.fillRect(BOSS_GATE_X - 200, GROUND_Y - 260, 700, 260);
     ctx.fillStyle = "#070312";
@@ -682,9 +687,8 @@ function drawEnemy(e) {
     } else if (e.type === "tentacle") {
         const hh = e.h0 || 0, bx = e.x, by = GROUND_Y - hh;
         ctx.fillStyle = "#2b3fbf"; ctx.fillRect(bx, by, e.w, hh);
-        ctx.fillStyle = "#5a6fe0";
-        for (let y = by + 10; y < GROUND_Y - 6; y += 16) ctx.fillRect(bx + e.w/2 - 4, y, 8, 8);
-        if (hh > 30) { ctx.fillStyle = "#000"; ctx.fillRect(bx + 8, by + 8, 6, 6); ctx.fillRect(bx + e.w - 14, by + 8, 6, 6); }
+        // smooth rounded tip (no suckers/eyes)
+        if (hh > 8) { ctx.fillStyle = "#4256d8"; ctx.beginPath(); ctx.arc(bx + e.w/2, by + 4, e.w/2, Math.PI, Math.PI*2); ctx.closePath(); ctx.fill(); }
     } else if (e.type === "skeleton") {
         ctx.fillStyle = "#e8e8e0"; ctx.fillRect(e.x, e.y, e.w, e.h);
         ctx.fillStyle = "#000"; ctx.fillRect(e.x + 6, e.y + 6, 6, 6); ctx.fillRect(e.x + e.w - 12, e.y + 6, 6, 6);
@@ -720,37 +724,63 @@ function drawBoss() {
     const cx = boss.x + boss.w/2, cy = boss.y + boss.h/2, r = boss.w/2;
     ctx.save();
     if (boss.hitFlash > 0 && Math.floor(boss.hitFlash/2)%2 === 0) ctx.globalAlpha = 0.5;
-    // Dark energy body (wobbling void)
-    const grad = ctx.createRadialGradient(cx, cy, 4, cx, cy, r);
-    grad.addColorStop(0, "#5a0e8a"); grad.addColorStop(0.5, "#26063f"); grad.addColorStop(1, "#050008");
+    // --- Dark Energy boss (styled after the reference art) ---
+    // Pink/purple halo rings behind the body
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = "rgba(255,60,150,0.5)";
+    ctx.beginPath(); ctx.ellipse(cx, cy, r*1.5, r*1.12, 0, 0.2, Math.PI*2 - 0.2); ctx.stroke();
+    ctx.strokeStyle = "rgba(160,60,255,0.4)";
+    ctx.beginPath(); ctx.ellipse(cx, cy, r*1.72, r*1.28, 0, 0.6, Math.PI - 0.2); ctx.stroke();
+
+    // Blue tentacles with teal tips, gently swaying
+    const tent = [{a:-2.5,l:1.9},{a:-0.5,l:2.1},{a:0.6,l:1.8},{a:2.4,l:2.0},{a:3.3,l:1.6}];
+    ctx.lineCap = "round";
+    for (const t of tent) {
+        const a1 = t.a + Math.sin(boss.t*0.06 + t.a) * 0.35;
+        const x0 = cx + Math.cos(a1)*r*0.7,   y0 = cy + Math.sin(a1)*r*0.7;
+        const x1 = cx + Math.cos(a1)*r*t.l,   y1 = cy + Math.sin(a1)*r*t.l;
+        const bend = Math.sin(boss.t*0.05 + t.a) * r*0.6;
+        const mx = (x0+x1)/2 + Math.cos(a1+1.57)*bend, my = (y0+y1)/2 + Math.sin(a1+1.57)*bend;
+        ctx.strokeStyle = "#4a90d8"; ctx.lineWidth = r*0.28;
+        ctx.beginPath(); ctx.moveTo(x0,y0); ctx.quadraticCurveTo(mx,my,x1,y1); ctx.stroke();
+        ctx.strokeStyle = "#7fe6d6"; ctx.lineWidth = r*0.22;   // teal tip
+        ctx.beginPath(); ctx.moveTo(x1 - Math.cos(a1)*r*0.32, y1 - Math.sin(a1)*r*0.32); ctx.lineTo(x1,y1); ctx.stroke();
+    }
+
+    // Purple blobby body
+    const grad = ctx.createRadialGradient(cx - r*0.2, cy - r*0.2, r*0.2, cx, cy, r*1.05);
+    grad.addColorStop(0, "#8a3ec8"); grad.addColorStop(0.6, "#5a1e9a"); grad.addColorStop(1, "#2a0a4a");
     ctx.fillStyle = grad;
     ctx.beginPath();
-    for (let a = 0; a < Math.PI*2; a += 0.25) {
-        const rr = r + Math.sin(a*5 + boss.t*0.12) * (boss.stage===2?16:9);
+    for (let a = 0; a < Math.PI*2; a += 0.35) {
+        const rr = r + Math.sin(a*3 + boss.t*0.1)*(r*0.14) + Math.cos(a*5)*(r*0.06);
         const px = cx + Math.cos(a)*rr, py = cy + Math.sin(a)*rr;
         a === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
     }
     ctx.closePath(); ctx.fill();
-    // Swirling energy arcs
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "rgba(255,0,255,0.5)";
-    ctx.beginPath(); ctx.arc(cx, cy, r*0.55, boss.t*0.05, boss.t*0.05 + 2); ctx.stroke();
-    ctx.strokeStyle = "rgba(0,229,255,0.45)";
-    ctx.beginPath(); ctx.arc(cx, cy, r*0.38, -boss.t*0.07, -boss.t*0.07 + 2.4); ctx.stroke();
-    // Glowing eyes
-    ctx.shadowColor = NEON.pink; ctx.shadowBlur = 12; ctx.fillStyle = NEON.pink;
-    ctx.beginPath(); ctx.arc(cx - r*0.32, cy + 4, r*0.12, 0, Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(cx + r*0.32, cy + 4, r*0.12, 0, Math.PI*2); ctx.fill();
+    // darker lobes for depth
+    ctx.fillStyle = "rgba(30,8,58,0.5)";
+    ctx.beginPath(); ctx.arc(cx - r*0.4, cy + r*0.4, r*0.3, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + r*0.45, cy - r*0.35, r*0.24, 0, Math.PI*2); ctx.fill();
+
+    // One big glowing eye with a vertical slit pupil
+    const eyeR = r*0.5;
+    ctx.fillStyle = "#12082a"; ctx.beginPath(); ctx.arc(cx, cy, eyeR + 3, 0, Math.PI*2); ctx.fill();
+    const eg = ctx.createRadialGradient(cx, cy, 2, cx, cy, eyeR);
+    eg.addColorStop(0, "#ffd6d6"); eg.addColorStop(0.4, "#ff5a7a"); eg.addColorStop(1, "#c02a5a");
+    ctx.shadowColor = NEON.pink; ctx.shadowBlur = 20;
+    ctx.fillStyle = eg; ctx.beginPath(); ctx.arc(cx, cy, eyeR, 0, Math.PI*2); ctx.fill();
     ctx.shadowBlur = 0;
-    // "The Helmet" (colander-style) on top
-    const hy = cy - r*0.30;
-    ctx.fillStyle = "#b8b8c2";
-    ctx.beginPath(); ctx.arc(cx, hy, r*0.7, Math.PI, Math.PI*2); ctx.closePath(); ctx.fill(); // dome (top half)
-    ctx.fillStyle = "#9a9aa6"; ctx.fillRect(cx - r*0.78, hy - 3, r*1.56, 6);                  // rim
-    ctx.fillStyle = "#e8e8f0"; ctx.beginPath(); ctx.arc(cx - r*0.24, hy - r*0.28, r*0.1, 0, Math.PI*2); ctx.fill(); // shine
-    ctx.fillStyle = "#6f6f7a";                                                                // colander holes
-    for (let i = -2; i <= 2; i++) ctx.fillRect(cx + i*r*0.22 - 2, hy - r*0.34, 4, 4);
-    ctx.fillStyle = "#c8c8d2"; ctx.fillRect(cx - 3, hy - r*0.72, 6, 8);                        // top knob
+    ctx.fillStyle = "#1a0510";
+    ctx.beginPath(); ctx.ellipse(cx, cy, eyeR*0.16, eyeR*0.72, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.beginPath(); ctx.arc(cx + eyeR*0.32, cy + eyeR*0.12, eyeR*0.16, 0, Math.PI*2); ctx.fill();
+
+    // Small metal helmet on top (kept from the earlier "Gumball helmet" request)
+    const hy = cy - r*0.82;
+    ctx.fillStyle = "#b8b8c2"; ctx.beginPath(); ctx.arc(cx, hy, r*0.5, Math.PI, Math.PI*2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#9a9aa6"; ctx.fillRect(cx - r*0.56, hy - 3, r*1.12, 5);
+    ctx.fillStyle = "#6f6f7a"; for (let i = -1; i <= 1; i++) ctx.fillRect(cx + i*r*0.2 - 2, hy - r*0.24, 3, 3);
     ctx.restore();
 
     // Boss HP bar (screen space)
@@ -769,13 +799,18 @@ function drawPlayer() {
     const p = player, x = p.x, y = p.y, w = p.w, h = p.h, flip = p.facing === -1;
     ctx.save();
     if (p.hurtCd > 0 && Math.floor(p.hurtCd/3)%2 === 0) ctx.globalAlpha = 0.4;
-    // black boots
-    ctx.fillStyle = "#111";
-    ctx.fillRect(x, y + h - 10, w/2 - 2, 10);
-    ctx.fillRect(x + w/2 + 2, y + h - 10, w/2 - 2, 10);
-    // blue pants
-    ctx.fillStyle = "#2a4bd8"; ctx.fillRect(x + 3, y + 48, w - 6, h - 58);
-    ctx.fillStyle = "#1f3aa8"; ctx.fillRect(x + w/2 - 1, y + 52, 2, h - 62);
+    // legs: normal = two legs; kicking = ONE standing leg (the other is drawn kicking below)
+    if (p.isKicking) {
+        const backX = flip ? x + w - 15 : x + 3;   // standing leg on the back side
+        ctx.fillStyle = "#2a4bd8"; ctx.fillRect(backX, y + 48, 12, h - 58);
+        ctx.fillStyle = "#111";   ctx.fillRect(backX, y + h - 10, 12, 10);
+    } else {
+        ctx.fillStyle = "#2a4bd8"; ctx.fillRect(x + 3, y + 48, w - 6, h - 58);
+        ctx.fillStyle = "#1f3aa8"; ctx.fillRect(x + w/2 - 1, y + 52, 2, h - 62);
+        ctx.fillStyle = "#111";
+        ctx.fillRect(x, y + h - 10, w/2 - 2, 10);
+        ctx.fillRect(x + w/2 + 2, y + h - 10, w/2 - 2, 10);
+    }
     // light t-shirt + arms
     ctx.fillStyle = "#f2efe4";
     ctx.fillRect(x + 2, y + 26, w - 4, 24);
@@ -793,11 +828,12 @@ function drawPlayer() {
     ctx.fillStyle = "#111";
     const ex = flip ? x + 9 : x + w - 17;
     ctx.fillRect(ex, y + 16, 4, 4); ctx.fillRect(ex + (flip ? 8 : -8), y + 16, 4, 4);
-    // kicking leg
+    // kicking leg: extended forward horizontally from the hip, boot at the end
     if (p.isKicking) {
-        const kx = flip ? x - 20 : x + w - 4;
-        ctx.fillStyle = "#2a4bd8"; ctx.fillRect(kx, y + 46, 22, 12);
-        ctx.fillStyle = "#111"; ctx.fillRect(flip ? kx - 6 : kx + 18, y + 46, 6, 12);
+        const legY = y + 54;
+        const kx = flip ? x - 22 : x + w - 4;
+        ctx.fillStyle = "#2a4bd8"; ctx.fillRect(kx, legY, 24, 12);
+        ctx.fillStyle = "#111"; ctx.fillRect(flip ? kx - 7 : kx + 24, legY, 7, 12);
     }
     ctx.restore();
 }
